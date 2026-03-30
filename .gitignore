@@ -194,6 +194,7 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 dataset-explanation.md
+dataset-explanation/dataset-changes.md
 
 # Cursor
 #  Cursor is an AI-powered code editor. `.cursorignore` specifies files/directories to
