@@ -1,6 +1,8 @@
 # Dataset Explanation Summary
 
 ## Overview
+Kaggle Link: https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce
+
 
 The Olist dataset is a group of related CSV files that describe the full lifecycle of an e-commerce order, from purchase to delivery and review. For delivery delay prediction, the most important idea is to connect these datasets so we can compare the promised delivery date with the actual delivery date and identify what factors may explain delays.
 

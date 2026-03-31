@@ -1,243 +1,56 @@
 # Dataset Preparation Plan
 
 ## Goal
+We want to train a model to predict delivery delay.
 
-Prepare the Olist data for a delivery delay prediction model.
+The model will not predict the estimated delivery date itself. Instead, it will predict how early or late an order was delivered compared to the estimated delivery date.
 
-The final training dataset should have **one row per order**. We can and should use multiple intermediate data frames during preparation, but the final modeling table should be order-level.
+We need to prepare the Olist dataset for a purchase-time delivery delay model.
 
-## Recommended Modeling Strategy
+The final modeling table will have **one row per order**.
 
-Keep the raw datasets separate at first, then create intermediate feature tables before building one final merged table.
-
-Recommended flow:
-
-1. Start from `olist_orders_dataset` as the base order table.
-2. Join customer-level location information from `olist_customers_dataset`.
-3. Build seller and item-level aggregates from `olist_order_items_dataset`.
-4. Join product attributes from `olist_products_dataset` before aggregating to order level.
-5. Use `olist_geolocation_dataset` to map ZIP prefixes to coordinates.
-6. Derive distance and other engineered features.
-7. Build one final order-level data frame for training.
-
-This avoids duplication problems from datasets like `order_items` and `payments`, where one order can have multiple rows.
-
-## Prediction-Time Assumption
-
-This plan assumes we want to predict delay **at purchase time**.
-
-That means we should only include features that are known when the customer places the order, or very shortly after if they are already part of the order record. We should not use fields that are only known after fulfillment or delivery.
-
-## Dataset-by-Dataset Column Decisions
-
-### 1. `olist_customers_dataset`
-
-Include:
-
-- `customer_id`
-- `customer_zip_code_prefix`
-- `customer_city`
-- `customer_state`
-
-Reasoning:
-
-- `customer_id` is needed to join with `orders`.
-- `customer_zip_code_prefix` lets us connect the customer to geolocation data.
-- `customer_city` and `customer_state` may capture regional delivery patterns that are not fully explained by distance alone.
-
-Example:
-
-- Two customers may be a similar distance from the seller, but one state may still experience more delays because of logistics coverage or regional routing patterns.
-
-### 2. `olist_geolocation_dataset`
-
-Use for feature engineering, not as a raw final table.
-
-Keep:
-
-- `geolocation_zip_code_prefix`
-- `geolocation_lat`
-- `geolocation_lng`
-
-Optional:
-
-- `geolocation_city`
-- `geolocation_state`
-
-Reasoning:
-
-- The main purpose of this table is to convert ZIP prefixes into coordinates.
-- Then we can calculate seller-to-customer distance.
-- City and state in this table are usually redundant if we already keep them from customers and sellers.
-
-Important note:
-
-- This dataset contains multiple rows per ZIP prefix, so we should first collapse it to one row per ZIP prefix, usually by averaging latitude and longitude for each prefix.
-
-### 3. `olist_order_items_dataset`
-
-Keep during preparation:
-
-- `order_id`
-- `order_item_id`
-- `product_id`
-- `seller_id`
-- `shipping_limit_date`
-- `price`
-- `freight_value`
-
-Reasoning:
-
-- This dataset is extremely useful, but most of its value comes from aggregation and feature engineering.
-- `order_item_id` helps us count how many items are in the order.
-- `product_id` lets us join to product characteristics.
-- `seller_id` lets us join seller geography and count how many sellers are involved in the order.
-- `price` and `freight_value` give us order value and shipping-cost information.
-- `shipping_limit_date` may help create a feature related to fulfillment pressure if we compare it with purchase time.
-
-Recommended engineered features at the order level:
-
-- `item_count`
-- `unique_products`
-- `unique_sellers`
-- `total_price`
-- `avg_price`
-- `total_freight`
-- `avg_freight`
-- `hours_until_shipping_limit` or `days_until_shipping_limit`
-
-Important note:
-
-- Raw `product_id` and raw `seller_id` usually should not remain in the first final model because they are high-cardinality identifiers.
-
-### 4. `olist_order_payments_dataset`
-
-Include as optional but useful.
-
-Keep during preparation:
-
-- `order_id`
-- `payment_type`
-- `payment_installments`
-- `payment_value`
-- `payment_sequential`
-
-Reasoning:
-
-- Payment data may not directly cause delivery delay, but it can still be predictive.
-- Some payment methods may be associated with slower approval or different order behavior.
-- Installments may correlate with order profile or order value.
-
-Recommended engineered features:
-
-- `num_payment_records`
-- `payment_type_mode` or most common payment type
-- `max_installments`
-- `total_payment_value`
-
-Important note:
-
-- This dataset is not as essential as orders, items, products, customers, sellers, and geolocation, so it can be added in version 2 if we want a simpler first pass.
-
-### 5. `olist_order_reviews_dataset`
-
-Exclude from modeling features.
-
-Reasoning:
-
-- Reviews happen after the order experience.
-- They are useful for post-delivery analysis, but not for a purchase-time delivery delay prediction model.
-
-### 6. `olist_orders_dataset`
-
-This should be the main base table.
-
-Keep:
-
-- `order_id`
-- `customer_id`
-- `order_purchase_timestamp`
-- `order_estimated_delivery_date`
-
-Use only for target creation, not as features:
-
-- `order_delivered_customer_date`
-
-Exclude from purchase-time features:
-
-- `order_approved_at`
-- `order_delivered_carrier_date`
-- `order_status`
-
-Reasoning:
-
-- `order_purchase_timestamp` is one of the most important inputs because it lets us derive time-based features like weekday, month, and hour.
-- `order_estimated_delivery_date` can be used to create the promised lead time.
-- `order_delivered_customer_date` is needed to compute the target, but should not be used as an input feature.
-- `order_delivered_carrier_date` and delivery-status information are only known later, so they should not be included in a purchase-time model.
-
-Target definition:
+Target:
 
 - `delay_days = order_delivered_customer_date - order_estimated_delivery_date`
 
 Interpretation:
 
-- Positive = late
-- Zero = on time
-- Negative = early
+- positive = late
+- zero = on time
+- negative = early
 
-### 7. `olist_products_dataset`
+## Final V1 Decisions
 
-Include:
+Prediction-time assumption:
 
-- `product_id`
-- `product_category_name`
-- `product_weight_g`
-- `product_length_cm`
-- `product_height_cm`
-- `product_width_cm`
+- Only use information available at purchase time.
 
-Optional:
+Use these raw datasets:
 
-- `product_name_lenght`
-- `product_description_lenght`
-- `product_photos_qty`
+- `olist_orders_dataset`
+- `olist_customers_dataset`
+- `olist_sellers_dataset`
+- `olist_geolocation_dataset`
+- `olist_order_items_dataset`
+- `olist_products_dataset`
 
-Reasoning:
+Do not use in V1:
 
-- Product type, size, and weight can strongly affect delivery difficulty.
-- Large or heavy products may require more handling or specialized transport.
-- Product category may capture common shipping patterns.
+- `olist_order_payments_dataset`
+- `olist_order_reviews_dataset`
 
-Recommended engineered features:
+Also exclude these as model inputs:
 
-- `product_volume_cm3 = product_length_cm * product_height_cm * product_width_cm`
-- order-level totals or averages for weight and volume
-- dominant product category or category counts
+- `order_delivered_customer_date`
+- `order_delivered_carrier_date`
+- `order_approved_at`
+- `order_status`
+- raw `product_id`
+- raw `seller_id`
+- raw coordinates
+- raw ZIP prefixes in the final model table
 
-Important note:
-
-- This dataset does not contain actual product names, descriptions, or image URLs. It contains lengths and counts related to those fields.
-
-### 8. `olist_sellers_dataset`
-
-Include:
-
-- `seller_id`
-- `seller_zip_code_prefix`
-- `seller_city`
-- `seller_state`
-
-Reasoning:
-
-- Seller ZIP prefix is needed to connect sellers to geolocation data.
-- Seller city and state may capture origin-region effects that distance alone does not explain.
-
-## Recommended Intermediate Data Frames
-
-Using multiple data frames is a standard and useful strategy here.
-
-Suggested intermediate tables:
+## Intermediate Data Frames
 
 ### `geo_zip_df`
 
@@ -251,104 +64,105 @@ One row per ZIP prefix with:
 
 One row per `customer_id` with:
 
-- customer ZIP prefix
-- customer city
-- customer state
-- customer coordinates
+- `customer_state`
+- customer coordinates used only to derive distance
 
 ### `seller_features_df`
 
 One row per `seller_id` with:
 
-- seller ZIP prefix
-- seller city
-- seller state
-- seller coordinates
+- `seller_state`
+- seller coordinates used only to derive distance
 
 ### `item_product_df`
 
-Item-level table created by joining:
+One row per item, created by joining:
 
 - `order_items`
 - `products`
-- `sellers`
+- seller information if needed for later order summaries
 
-This table can then be aggregated to order level.
+This is the detailed item-level table used for feature engineering.
 
 ### `order_item_agg_df`
 
-One row per `order_id` with:
+One row per `order_id` with these finalized V1 features:
 
-- item counts
-- seller counts
-- price aggregates
-- freight aggregates
-- weight aggregates
-- volume aggregates
-- category-based summary features
-
-### `payment_agg_df`
-
-One row per `order_id` with:
-
-- payment aggregates
-- installment features
-- payment-type summary
+- `item_count`
+- `unique_products`
+- `unique_sellers`
+- `total_price`
+- `total_freight`
+- `total_weight`
+- `total_volume`
+- `dominant_category`
+- `num_categories`
 
 ### `final_model_df`
 
 One row per `order_id` with:
 
-- order features
-- customer features
-- order-item aggregates
-- payment aggregates if included
-- engineered distance and time features
+- time features
+- geography features
+- order-item aggregate features
 - target column
 
-## Strong V1 Feature Set
+## Final V1 Feature Set
 
-Recommended first-version features:
+### Time features
 
-- purchase weekday
-- purchase month
-- purchase hour
-- promised lead time in days
-- customer ZIP/state/city
-- seller ZIP/state/city
-- customer latitude and longitude
-- seller latitude and longitude
-- seller-customer distance
-- item count
-- unique sellers
-- total price
-- total freight
-- total weight
-- total volume
-- product category summary
+From `order_purchase_timestamp`:
 
-Optional V2 additions:
+- `purchase_month`
+- `purchase_dayofweek`
+- `purchase_hour`
+- `is_weekend`
 
-- payment features
-- text-length product metadata
-- photo count features
+From estimated delivery:
 
-## Main Exclusions
+- `estimated_delivery_time_days`
 
-Do not use as model features:
+This means the number of days between purchase time and estimated delivery date.
 
-- `order_delivered_customer_date`
-- `order_delivered_carrier_date`
-- review data
-- raw review scores or review timestamps
-- raw high-cardinality identifiers like `product_id` and `seller_id` in the first version
+### Geography features
 
-## Final Recommendation
+Final geography features:
 
-The best approach is:
+- `customer_state`
+- `seller_state`
+- `distance_km`
+- `same_state`
 
-- use multiple intermediate data frames while preparing data
-- aggregate item-level and payment-level tables to the order level
-- build one final modeling dataset with one row per `order_id`
+Coordinates are used only to calculate `distance_km`, then dropped.
 
-This structure is easier to reason about, easier to debug, and much safer for machine learning than merging every raw column from every dataset into one table.
+### Order-item features
+
+- `item_count`
+- `unique_products`
+- `unique_sellers`
+- `total_price`
+- `total_freight`
+- `total_weight`
+- `total_volume`
+- `dominant_category`
+- `num_categories`
+
+## Missing-Value Handling
+
+For V1:
+
+- numeric product fields such as weight and dimensions: median imputation
+- missing product category: fill with `unknown`
+- missing geolocation match: keep the row and handle `distance_km` during preprocessing
+- add a missing-distance flag later only if needed
+
+Important:
+
+- Fit imputation values on the training split only, then apply them to test data.
+
+## Notes For Implementation
+
+- `shipping_limit_date` features are excluded in V1 because we are not fully sure they are valid at purchase time.
+- Payment features are saved for V2.
+- Customer history features are saved for V2.
+- If V1 performance is weak, V2 can add payment features and richer item statistics such as averages or max values.
